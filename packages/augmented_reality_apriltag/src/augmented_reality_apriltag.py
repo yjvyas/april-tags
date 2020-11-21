@@ -29,7 +29,7 @@ class ARNode(DTROS):
 
         # Initialize the DTROS parent class
         super(ARNode, self).__init__(node_name=node_name,node_type=NodeType.GENERIC)
-        self.veh = rospy.get_namespace().strip("/")
+        self.veh_name = rospy.get_namespace().strip("/")
 
 
         calibration_fname = '/data/config/calibrations/camera_extrinsic/default.yaml'
@@ -64,23 +64,24 @@ class ARNode(DTROS):
 
         # Initialize an instance of Renderer giving the model in input.
         self.renderer = Renderer(rospack.get_path('augmented_reality_apriltag') + '/src/models/duckie.obj')
-        self.bridge = CvBridge()
+        self.cvbr = CvBridge()
 
     def callback(self, msg):
         """Detects april-tags and renders duckie on them."""
         img = self.readImage(msg)
+         
+        if len(img) > 0:
+            K = self.K
+            tags = self.at_detector.detect(img[:,:,0], 
+                                        estimate_tag_pose=True, 
+                                        camera_params=[K[0,0], K[1,1], K[0,2], K[1,2]],
+                                        tag_size=0.0675)
 
-        K = self.K
-        tags = self.at_detector.detect(img[:,:,0], 
-                                       estimate_tag_pose=True, 
-                                       camera_params=[K[0], K[4], K[2], K[5]],
-                                       tag_size=0.0675)
-
-        for t in tags:
-            P = self.projection_matrix(t.homography, self.K)
-            img = self.renderer.render(img, P)
-        
-        self.pub.publish(self.cvbr.cv2_to_compressed_imgmsg(img))
+            for t in tags:
+                P = self.projection_matrix(t.homography, self.K)
+                img = self.renderer.render(img, P)
+            
+            self.pub.publish(self.cvbr.cv2_to_compressed_imgmsg(img))
 
     
     def projection_matrix(self, H, K):
@@ -118,10 +119,12 @@ class ARNode(DTROS):
                 OpenCV image
         """
         try:
-            cv_image = self.bridge.compressed_imgmsg_to_cv2(msg_image)
+            cv_image = self.cvbr.compressed_imgmsg_to_cv2(msg_image)
             return cv_image
         except CvBridgeError as e:
             self.log(e)
+            return []
+        except AttributeError as e:
             return []
 
     def readYamlFile(self,fname):
